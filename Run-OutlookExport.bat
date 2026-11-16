@@ -33,7 +33,7 @@ set /p "START_DATE=Start date (blank = no lower limit): "
 set /p "END_DATE=End date (blank = now; includes the whole day): "
 
 echo.
-echo Exporting messages ...
+echo Exporting messages as HTML with images and attachments ...
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "& $env:SCRIPT -Sender $env:SENDER -OutputPath $env:OUTPUT -StartDate $env:START_DATE -EndDate $env:END_DATE -Recurse"
 set "EXIT_CODE=%ERRORLEVEL%"
 

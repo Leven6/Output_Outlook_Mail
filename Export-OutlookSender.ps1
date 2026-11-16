@@ -98,8 +98,11 @@ function Get-LatestExportedDate {
     param([Parameter(Mandatory = $true)][string]$Directory)
 
     $latestDate = $null
-    foreach ($file in Get-ChildItem -LiteralPath $Directory -Filter '*.msg' -File) {
-        if ($file.BaseName -notmatch '^(?<date>\d{8}-\d{6}) - ') {
+    foreach ($messageDirectory in Get-ChildItem -LiteralPath $Directory -Directory) {
+        if ($messageDirectory.Name -notmatch '^(?<date>\d{8}-\d{6}) - ') {
+            continue
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $messageDirectory.FullName 'index.html') -PathType Leaf)) {
             continue
         }
 
@@ -155,15 +158,53 @@ function Export-OutlookFolder {
                 $sentDate = $sentOn.ToString('yyyyMMdd-HHmmss')
                 $subject = Get-SafeFileName -Name ([string]$item.Subject)
                 $suffix = Get-EntryIdSuffix -EntryId ([string]$item.EntryID)
-                $filePath = Join-Path $Destination "$sentDate - $subject - $suffix.msg"
+                $messageDirectory = Join-Path $Destination "$sentDate - $subject - $suffix"
+                $filePath = Join-Path $messageDirectory 'index.html'
 
-                if (Test-Path -LiteralPath $filePath) {
+                if (Test-Path -LiteralPath $filePath -PathType Leaf) {
                     $script:AlreadyExportedCount++
                     continue
                 }
 
-                if ($PSCmdlet.ShouldProcess($filePath, 'Export Outlook message with attachments')) {
-                    $item.SaveAs($filePath, 9)
+                if ($PSCmdlet.ShouldProcess($filePath, 'Export Outlook HTML message, images and attachments')) {
+                    $stagingDirectory = Join-Path $Destination ".outlook-html-$([guid]::NewGuid().ToString('N'))"
+                    try {
+                        [void][IO.Directory]::CreateDirectory($stagingDirectory)
+                        $attachments = $item.Attachments
+                        try {
+                            if ($attachments.Count -gt 0) {
+                                $attachmentDirectory = Join-Path $stagingDirectory 'attachments'
+                                [void][IO.Directory]::CreateDirectory($attachmentDirectory)
+                                for ($attachmentIndex = 1; $attachmentIndex -le $attachments.Count; $attachmentIndex++) {
+                                    $attachment = $null
+                                    try {
+                                        $attachment = $attachments.Item($attachmentIndex)
+                                        $attachmentName = Get-SafeFileName -Name ([string]$attachment.FileName)
+                                        $attachmentPath = Join-Path $attachmentDirectory ('{0:D3} - {1}' -f $attachmentIndex, $attachmentName)
+                                        $attachment.SaveAsFile($attachmentPath)
+                                    }
+                                    finally {
+                                        if ($null -ne $attachment -and [Runtime.InteropServices.Marshal]::IsComObject($attachment)) {
+                                            [void][Runtime.InteropServices.Marshal]::ReleaseComObject($attachment)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        finally {
+                            if ([Runtime.InteropServices.Marshal]::IsComObject($attachments)) {
+                                [void][Runtime.InteropServices.Marshal]::ReleaseComObject($attachments)
+                            }
+                        }
+
+                        $item.SaveAs((Join-Path $stagingDirectory 'index.html'), 5)
+                        [IO.Directory]::Move($stagingDirectory, $messageDirectory)
+                    }
+                    finally {
+                        if ([IO.Directory]::Exists($stagingDirectory)) {
+                            [IO.Directory]::Delete($stagingDirectory, $true)
+                        }
+                    }
                     $script:ExportedCount++
                     Write-Verbose "Exported: $filePath"
                 }
